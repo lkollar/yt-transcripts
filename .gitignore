@@ -1,2 +1,4 @@
 transcripts/
 __pycache__/
+
+.venv/
