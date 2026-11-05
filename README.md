@@ -23,7 +23,7 @@ Both commands save `transcripts/JGtkTjn4120.txt`; the second adds timestamps and
 uv run yt_report.py URL --open
 ```
 
-Fetches the transcript, pipes it to `claude -p`, saves a self-contained HTML report to `reports/<video_id>.html`. Options: `--model`, `--lang`, `--out-dir`, `--cookies-from-browser`. Needs the `claude` CLI on PATH.
+Fetches the transcript, pipes it to `claude -p`, saves a self-contained HTML report to `reports/<video_id>.html`. Reports are organised by idea; action steps and linked references are added when the video supports them. `claude` gets `WebSearch` and `WebFetch` to find those links, so reports with many references take longer. Options: `--model`, `--lang`, `--out-dir`, `--cookies-from-browser`. Needs the `claude` CLI on PATH.
 
 ## Web UI
 
