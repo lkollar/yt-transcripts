@@ -24,7 +24,8 @@ YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtu
 # Reports embed text derived from untrusted transcripts, so they get no scripts
 # and an opaque origin. Links still have to open the video.
 REPORT_CSP = (
-    "default-src 'none'; style-src 'unsafe-inline'; img-src https://i.ytimg.com; "
+    "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; "
+    "font-src https://fonts.gstatic.com; img-src https://i.ytimg.com; "
     "sandbox allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
 )
 

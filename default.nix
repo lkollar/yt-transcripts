@@ -14,6 +14,7 @@ stdenvNoCC.mkDerivation {
     root = ./.;
     fileset = lib.fileset.unions [
       ./fetch_transcript.py
+      ./report.css
       ./web.py
       ./yt_report.py
     ];
@@ -23,7 +24,7 @@ stdenvNoCC.mkDerivation {
   dontBuild = true;
   installPhase = ''
     mkdir -p $out/bin $out/libexec/yt-transcripts
-    cp *.py $out/libexec/yt-transcripts/
+    cp *.py *.css $out/libexec/yt-transcripts/
     makeWrapper ${python}/bin/python3 $out/bin/yt-transcripts-web \
       --add-flags $out/libexec/yt-transcripts/web.py
     makeWrapper ${python}/bin/python3 $out/bin/yt-report \
