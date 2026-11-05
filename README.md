@@ -34,4 +34,6 @@ tailscale serve --bg --https 8446 http://127.0.0.1:8765
 
 Submit a URL and browse past reports at `https://<machine>.<tailnet>.ts.net:8446`. Options: `--host`, `--port`, `--model`, `--out-dir`, `--cookies-from-browser`.
 
+For a permanent service, `flake.nix` exports a NixOS module (`services.yt-transcripts`) which runs the web UI as a user service and adds the Tailscale route.
+
 There is no authentication, so keep the default `127.0.0.1` host and let `tailscale serve` limit access to your tailnet. Anyone on the tailnet can start reports, which run on your Claude account. Reports are generated one at a time; failed jobs stay listed until the server restarts.
