@@ -2,9 +2,10 @@
 """Fetch the subtitles of a YouTube video as plain text using yt-dlp.
 
 Usage:
-    python fetch_transcript.py URL [--lang en] [--out-dir transcripts] [--timestamps]
+    uv run fetch_transcript.py URL [--lang LANG] [--out-dir transcripts] [--timestamps]
 
 Writes <out-dir>/<video_id>.txt (and prints it to stdout with --stdout).
+Uses the video's original language unless --lang is given.
 Prefers manual subtitles, falls back to auto-generated captions.
 """
 import argparse
@@ -14,14 +15,25 @@ import sys
 from pathlib import Path
 
 from yt_dlp import YoutubeDL
+from yt_dlp.networking.exceptions import HTTPError
+
+
+def original_language(info):
+    """Return the spoken language. info["language"] can be a dub on auto-dubbed videos."""
+    for f in info.get("formats") or []:
+        if "original" in (f.get("format_note") or "") and f.get("language"):
+            return f["language"].split("-")[0]
+    return (info.get("language") or "en").split("-")[0]
 
 
 def pick_track(info, lang):
     """Return (track_list, source) choosing manual subs before automatic captions."""
     for source in ("subtitles", "automatic_captions"):
         tracks = info.get(source) or {}
-        # exact match first, then any variant like en-US / en-orig
-        for key in [lang] + [k for k in tracks if k.split("-")[0] == lang and k != lang]:
+        # <lang>-orig is the real ASR track; plain <lang> can be a machine
+        # translation (tlang=), which YouTube answers with HTTP 429.
+        preferred = [f"{lang}-orig", lang]
+        for key in preferred + [k for k in tracks if k.split("-")[0] == lang and k not in preferred]:
             if key in tracks:
                 return tracks[key], f"{source}:{key}"
     return None, None
@@ -65,19 +77,34 @@ def parse_json3(data, timestamps):
     return "\n\n".join(paragraphs)
 
 
-def fetch(url, lang="en", timestamps=False, cookies_from_browser=None):
-    opts = {"quiet": True, "no_warnings": True, "skip_download": True}
+def fetch(url, lang=None, timestamps=False, cookies_from_browser=None):
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "noplaylist": True,
+        # YouTube needs a JS runtime to solve player challenges
+        "js_runtimes": {"node": {}, "deno": {}},
+    }
     if cookies_from_browser:
         opts["cookiesfrombrowser"] = (cookies_from_browser,)
     with YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
+        lang = lang or original_language(info)
         tracks, source = pick_track(info, lang)
         if not tracks:
             raise SystemExit(f"No '{lang}' subtitles found for {info['id']}")
         track = next((t for t in tracks if t.get("ext") == "json3"), None)
         if not track:
             raise SystemExit(f"No json3 subtitle format available ({source})")
-        raw = ydl.urlopen(track["url"]).read()
+        try:
+            raw = ydl.urlopen(track["url"]).read()
+        except HTTPError as e:
+            raise SystemExit(
+                f"Subtitle download failed ({source}): {e}\n"
+                "HTTP 429 is expected for machine-translated tracks: drop --lang to use the "
+                "original language. Otherwise retry with --cookies-from-browser BROWSER."
+            )
     text = parse_json3(json.loads(raw), timestamps)
     meta = {
         "id": info["id"],
@@ -93,7 +120,7 @@ def fetch(url, lang="en", timestamps=False, cookies_from_browser=None):
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("url")
-    p.add_argument("--lang", default="en")
+    p.add_argument("--lang", help="subtitle language (default: the video's original language)")
     p.add_argument("--out-dir", default="transcripts")
     p.add_argument("--timestamps", action="store_true", help="prefix each caption line with [HH:MM:SS]")
     p.add_argument("--cookies-from-browser", metavar="BROWSER", help="load cookies from a browser supported by yt-dlp")
