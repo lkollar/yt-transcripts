@@ -24,6 +24,7 @@ def server(tmp_path, monkeypatch):
         return "https://s.ht-ml.app/"
 
     monkeypatch.setattr(web, "publish", fake_publish)
+    monkeypatch.setattr(web, "send", lambda path, **config: uploads.append(("kindle", path.name, config["to"])))
     monkeypatch.setattr(web.Handler, "worker", web.Worker(str(tmp_path), None, None))
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), web.Handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
@@ -55,6 +56,22 @@ def test_publish_rejects_unknown_reports(server, report_id):
     base, uploads = server
     assert request(base + "/api/publish", {"id": report_id})[0] == 404
     assert uploads == []
+
+
+def test_kindle_hidden_unless_configured(server):
+    base, uploads = server
+    assert request(base + "/api/state")[1]["kindle"] is False
+    assert request(base + "/api/kindle", {"id": "abc"})[0] == 404
+    assert uploads == []
+
+
+def test_kindle_sends_to_configured_address(server, monkeypatch):
+    base, uploads = server
+    monkeypatch.setattr(web.Handler, "kindle", {"to": "me@kindle.com", "sender": "s", "host": "h", "port": 25})
+    assert request(base + "/api/state")[1]["kindle"] is True
+    assert request(base + "/api/kindle", {"id": "abc", "to": "x@evil"}) == (200, {})
+    assert request(base + "/api/kindle", {"id": "../abc"})[0] == 404
+    assert uploads == [("kindle", "abc.html", "me@kindle.com")]
 
 
 def test_post_requires_json(server):

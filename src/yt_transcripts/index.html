@@ -20,8 +20,8 @@ a { color: var(--accent); text-decoration: none; font-weight: 600; }
 a:hover { text-decoration: underline; }
 .meta { color: var(--muted); font-size: .875rem; }
 .error { color: var(--bad); font-size: .875rem; white-space: pre-wrap; }
-.publish { margin-top: .25rem; padding: .2rem .6rem; font-size: .8rem; font-weight: 500; color: var(--accent); background: none; border: 1px solid var(--line); border-radius: 6px; }
-.publish:disabled { opacity: .6; cursor: default; }
+.action { margin-top: .25rem; padding: .2rem .6rem; font-size: .8rem; font-weight: 500; color: var(--accent); background: none; border: 1px solid var(--line); border-radius: 6px; }
+.action:disabled { opacity: .6; cursor: default; }
 </style>
 </head>
 <body>
@@ -62,6 +62,7 @@ function render(state) {
     a.href = `reports/${r.id}.html`;
     li.append(a, el("div", "meta", [r.channel, duration(r.duration), new Date(r.created * 1000).toLocaleDateString()].filter(Boolean).join(" \u00b7 ")));
     li.append(publishControls(r));
+    if (state.kindle) li.append(kindleControls(r));
     return li;
   });
   $("reports").replaceChildren(...reports);
@@ -77,22 +78,39 @@ function publishControls(r) {
     a.rel = "noopener";
     div.append("Public: ", a, " ");
   }
-  const button = el("button", "publish", r.published ? "Update" : "Publish");
   const error = el("div", "error");
+  const confirmText = r.published ? null : "Publish this report as a public page on ht-ml.app? Anyone with the link can read it, and it can't be deleted from here.";
+  div.append(actionButton(r.published ? "Update" : "Publish", "api/publish", r.id, error, confirmText), error);
+  return div;
+}
+
+function kindleControls(r) {
+  const div = el("div", "meta"), error = el("div", "error");
+  if (r.kindle) div.append(`Sent to Kindle ${new Date(r.kindle.sent * 1000).toLocaleDateString()} `);
+  div.append(actionButton(r.kindle ? "Resend to Kindle" : "Send to Kindle", "api/kindle", r.id, error), error);
+  return div;
+}
+
+function actionButton(label, path, id, error, confirmText) {
+  const button = el("button", "action", label);
   button.addEventListener("click", async () => {
-    if (!r.published && !confirm("Publish this report as a public page on ht-ml.app? Anyone with the link can read it, and it can't be deleted from here.")) return;
+    if (confirmText && !confirm(confirmText)) return;
     button.disabled = true;
     error.textContent = "";
-    const res = await fetch("api/publish", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({id: r.id}),
-    });
-    if (res.ok) refresh();
-    else { error.textContent = (await res.json()).error; button.disabled = false; }
+    try {
+      const res = await fetch(path, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({id}),
+      });
+      if (res.ok) return refresh();
+      error.textContent = (await res.json()).error;
+    } catch {
+      error.textContent = "Request failed";
+    }
+    button.disabled = false;
   });
-  div.append(button, error);
-  return div;
+  return button;
 }
 
 async function refresh() {

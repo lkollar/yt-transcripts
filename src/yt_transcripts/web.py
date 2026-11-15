@@ -2,6 +2,7 @@
 
 Usage:
     yt-report-web [--host 127.0.0.1] [--port 8765] [--out-dir reports] [--model MODEL]
+                  [--kindle-to ADDRESS --kindle-from ADDRESS]
 
 There is no authentication. Keep the default host and put the UI behind a
 private network or an authenticating proxy, see the README.
@@ -17,6 +18,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from . import Error
+from .kindle import send
 from .publish import publish
 from .report import make_report
 
@@ -80,7 +82,11 @@ def is_youtube_url(url):
 
 class Handler(BaseHTTPRequestHandler):
     worker = None
-    publish_lock = threading.Lock()
+    # Keyword arguments for kindle.send, or None when sending isn't configured
+    kindle = None
+    # One publish or send at a time: both rewrite the report's metadata, and
+    # double clicks shouldn't create two pages or send twice
+    lock = threading.Lock()
 
     def respond(self, code, body, content_type, headers=()):
         self.send_response(code)
@@ -99,7 +105,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/":
             self.respond(200, PAGE, "text/html; charset=utf-8")
         elif path == "/api/state":
-            self.respond_json(200, self.worker.state())
+            self.respond_json(200, {**self.worker.state(), "kindle": self.kindle is not None})
         elif match := re.fullmatch(r"/reports/([\w-]+)\.html", path):
             report = Path(self.worker.out_dir) / f"{match[1]}.html"
             if report.is_file():
@@ -115,6 +121,8 @@ class Handler(BaseHTTPRequestHandler):
             self.submit()
         elif path == "/api/publish":
             self.publish()
+        elif path == "/api/kindle" and self.kindle:
+            self.send_to_kindle()
         else:
             self.respond_json(404, {"error": "not found"})
 
@@ -140,19 +148,35 @@ class Handler(BaseHTTPRequestHandler):
         self.worker.submit(url)
         self.respond_json(202, {})
 
-    def publish(self):
+    def read_report(self):
+        """Return the path of the report named by the JSON body's id, or None after an error response."""
         if (report_id := self.read_field("id")) is None:
-            return
+            return None
         report = Path(self.worker.out_dir) / f"{report_id}.html"
         if not re.fullmatch(r"[\w-]+", report_id) or not report.is_file():
-            return self.respond_json(404, {"error": "not found"})
-        # One upload at a time, so double clicks can't create two pages
-        with self.publish_lock:
+            self.respond_json(404, {"error": "not found"})
+            return None
+        return report
+
+    def publish(self):
+        if (report := self.read_report()) is None:
+            return
+        with self.lock:
             try:
                 url = publish(report)
             except Error as e:
                 return self.respond_json(502, {"error": str(e)})
         self.respond_json(200, {"url": url})
+
+    def send_to_kindle(self):
+        if (report := self.read_report()) is None:
+            return
+        with self.lock:
+            try:
+                send(report, **self.kindle)
+            except Error as e:
+                return self.respond_json(502, {"error": str(e)})
+        self.respond_json(200, {})
 
 
 def main():
@@ -162,10 +186,18 @@ def main():
     p.add_argument("--out-dir", default="reports")
     p.add_argument("--model", help="model passed to claude (default: the CLI's default)")
     p.add_argument("--cookies-from-browser", metavar="BROWSER", help="load cookies from a browser supported by yt-dlp")
+    p.add_argument("--kindle-to", metavar="ADDRESS", help="Send to Kindle email address; enables sending reports as EPUB")
+    p.add_argument("--kindle-from", metavar="ADDRESS", help="sender, which must be on the Kindle account's approved list")
+    p.add_argument("--smtp-host", default="localhost", help="SMTP relay accepting mail without authentication")
+    p.add_argument("--smtp-port", type=int, default=25)
     a = p.parse_args()
+    if bool(a.kindle_to) != bool(a.kindle_from):
+        p.error("--kindle-to and --kindle-from go together")
 
     Path(a.out_dir).mkdir(parents=True, exist_ok=True)
     Handler.worker = Worker(a.out_dir, a.model, a.cookies_from_browser)
+    if a.kindle_to:
+        Handler.kindle = {"to": a.kindle_to, "sender": a.kindle_from, "host": a.smtp_host, "port": a.smtp_port}
     print(f"Listening on http://{a.host}:{a.port}")
     ThreadingHTTPServer((a.host, a.port), Handler).serve_forever()
 
