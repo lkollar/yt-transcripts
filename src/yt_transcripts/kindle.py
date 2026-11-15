@@ -16,13 +16,22 @@ STYLESHEET = Path(__file__).with_name("kindle.css")
 
 VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
 # Dropped with their content: page furniture, and images, which are all remote
-DROP = {"head", "script", "style", "img", "iframe", "object", "embed", "svg", "video", "audio", "form", "button", "select", "textarea"}
+DROP = {
+    "head", "script", "style", "img", "iframe", "object", "embed", "svg", "video", "audio", "form", "button",
+    "select", "textarea", "link", "meta", "base",
+}
 # Dropped, keeping their content
 UNWRAP = {"html", "body"}
 # Kindle doesn't render <details>
 RENAME = {"details": "div", "summary": "h2"}
 ATTRS = {"href", "id", "class", "colspan", "rowspan", "start", "lang"}
-INVALID_XML = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+INVALID_XML = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]")
+SAFE_HREF = re.compile(r"(https?:|mailto:|#)", re.IGNORECASE)
+
+
+def clean(text):
+    """Make metadata safe for XML and email headers: no control characters or line breaks."""
+    return " ".join(INVALID_XML.sub("", text).split())
 
 
 class XHTMLWriter(HTMLParser):
@@ -35,16 +44,23 @@ class XHTMLWriter(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.out = []
         self.stack = []
-        self.skip = 0
+        # The dropped element being skipped, and how deeply it's nested in itself
+        self.skip = None
+        self.depth = 0
         self.toc = []
         self.anchor = None
         self.heading = None
         self.ids = 0
 
     def handle_starttag(self, tag, attrs):
-        if self.skip or tag in DROP:
+        if self.skip == "head" and tag == "body":
+            self.skip = None
+        if self.skip:
+            self.depth += tag == self.skip
+            return
+        if tag in DROP:
             if tag not in VOID:
-                self.skip += 1
+                self.skip, self.depth = tag, 1
             return
         if tag in UNWRAP or not re.fullmatch(r"[a-z][a-z0-9-]*", tag):
             return
@@ -52,7 +68,7 @@ class XHTMLWriter(HTMLParser):
             if dict(attrs).get("type") == "checkbox":
                 self.out.append("☐ ")
             return
-        attrs = {k: v for k, v in attrs if k in ATTRS and v is not None}
+        attrs = {k: v for k, v in attrs if k in ATTRS and v is not None and (k != "href" or SAFE_HREF.match(v))}
         if tag in ("section", "details"):
             if "id" not in attrs:
                 self.ids += 1
@@ -72,13 +88,17 @@ class XHTMLWriter(HTMLParser):
         if tag in VOID:
             return
         if self.skip:
-            self.skip -= 1
+            if tag == self.skip:
+                self.depth -= 1
+                if not self.depth:
+                    self.skip = None
             return
         tag = RENAME.get(tag, tag)
         if tag not in self.stack:
             return
         if tag == "h2" and self.heading is not None:
-            self.toc.append((self.anchor, " ".join("".join(self.heading).split())))
+            if text := " ".join("".join(self.heading).split()):
+                self.toc.append((self.anchor, text))
             self.heading = self.anchor = None
         while (open_tag := self.stack.pop()) != tag:
             self.out.append(f"</{open_tag}>")
@@ -107,7 +127,8 @@ def xhtml_page(title, lang, body, head=""):
 def epub(path):
     """Build an EPUB of a report, with the video's thumbnail as its cover when available."""
     meta = read_meta(path) or {}
-    title = meta.get("title") or path.stem
+    title = clean(meta.get("title") or "") or path.stem
+    channel, url = clean(meta.get("channel") or ""), clean(meta.get("url") or "")
     # subtitle_source is like "subtitles:en-orig"
     lang = re.sub(r"[^\w-]", "", meta.get("subtitle_source", "").rpartition(":")[2].split("-")[0]) or "en"
     writer = XHTMLWriter()
@@ -120,6 +141,8 @@ def epub(path):
     )
     cover = save_thumbnail(path, path.stem)
     if cover and not cover.read_bytes().startswith(b"\xff\xd8"):
+        # Not a JPEG, so fetch it again next time
+        cover.unlink()
         cover = None
     modified = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(meta.get("created", time.time())))
     opf = f"""<?xml version="1.0" encoding="utf-8"?>
@@ -128,18 +151,19 @@ def epub(path):
 <dc:identifier id="uid">urn:youtube:{escape(path.stem)}</dc:identifier>
 <dc:title>{escape(title)}</dc:title>
 <dc:language>{lang}</dc:language>
-{f"<dc:creator>{escape(meta['channel'])}</dc:creator>" if meta.get("channel") else ""}
-{f"<dc:source>{escape(meta['url'])}</dc:source>" if meta.get("url") else ""}
+{f"<dc:creator>{escape(channel)}</dc:creator>" if channel else ""}
+{f"<dc:source>{escape(url)}</dc:source>" if url else ""}
 <meta property="dcterms:modified">{modified}</meta>
 {'<meta name="cover" content="cover"/>' if cover else ""}
 </metadata>
 <manifest>
 <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+{'<item id="cover-page" href="cover.xhtml" media-type="application/xhtml+xml"/>' if cover else ""}
 <item id="report" href="report.xhtml" media-type="application/xhtml+xml"/>
 <item id="css" href="style.css" media-type="text/css"/>
 {'<item id="cover" href="cover.jpg" media-type="image/jpeg" properties="cover-image"/>' if cover else ""}
 </manifest>
-<spine><itemref idref="report"/></spine>
+<spine>{'<itemref idref="cover-page"/>' if cover else ""}<itemref idref="report"/></spine>
 </package>
 """
     buf = io.BytesIO()
@@ -161,6 +185,10 @@ def epub(path):
         ))
         z.writestr("OEBPS/style.css", STYLESHEET.read_text(encoding="utf-8"))
         if cover:
+            # Kindle's converter picks the cover up more reliably from a page of its own
+            z.writestr("OEBPS/cover.xhtml", xhtml_page(
+                title, lang, '<div style="text-align: center"><img src="cover.jpg" alt="" style="max-width: 100%"/></div>',
+            ))
             z.write(cover, "OEBPS/cover.jpg")
     return buf.getvalue()
 
@@ -172,12 +200,15 @@ def send(path, to, sender, host="localhost", port=25):
     sender must be on the Kindle account's approved list.
     """
     meta = read_meta(path) or {}
+    title = clean(meta.get("title") or "") or path.stem
     msg = EmailMessage()
     msg["From"] = sender
     msg["To"] = to
-    msg["Subject"] = meta.get("title") or path.stem
+    msg["Subject"] = title
     msg.set_content("Sent by yt-report.")
-    msg.add_attachment(epub(path), maintype="application", subtype="epub+zip", filename=f"{path.stem}.epub")
+    # Kindle titles personal documents after the attachment's name
+    name = re.sub(r'[\\/:*?"<>|\s]+', " ", title).strip()[:100] or path.stem
+    msg.add_attachment(epub(path), maintype="application", subtype="epub+zip", filename=f"{name}.epub")
     try:
         with smtplib.SMTP(host, port, timeout=60) as smtp:
             smtp.send_message(msg)

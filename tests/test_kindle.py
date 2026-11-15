@@ -13,6 +13,8 @@ REPORT = """<!DOCTYPE html><html><head><title>T</title><link rel="stylesheet" hr
 <div class="body"><p>Unclosed <b>bold<p>next</div></section>
 <section class="idea"><h2>Second</h2><label><input type="checkbox"><span>Do it</span></label></section>
 <details open><summary>References</summary><ul><li>x</li></ul></details>
+<button><p>unclosed</button><p>after button \ufffe<a href="javascript:x">js</a></p>
+<section><h2></h2></section>
 <script>alert(1)</script></div></body></html>
 """
 
@@ -22,7 +24,7 @@ def report(tmp_path):
     path = tmp_path / "abc.html"
     path.write_text(REPORT)
     (tmp_path / "abc.json").write_text(json.dumps({
-        "id": "abc", "title": "A <video>", "channel": "Chan", "url": "https://youtu.be/abc",
+        "id": "abc", "title": "A <video>\x0b\n", "channel": "Chan", "url": "https://youtu.be/abc",
         "subtitle_source": "subtitles:de-orig", "created": 1,
     }))
     (tmp_path / "abc.jpg").write_bytes(b"\xff\xd8\xff\xe0jpeg")
@@ -39,13 +41,16 @@ def test_epub_structure(report):
     body = z.read("OEBPS/report.xhtml").decode()
     assert "alert" not in body and "<img" not in body and "<input" not in body and "target=" not in body
     assert "☐ " in body and 'href="https://y/?a=1&amp;t=5"' in body
+    assert "after button" in body and "unclosed" not in body and "javascript" not in body and "\ufffe" not in body
     nav = z.read("OEBPS/nav.xhtml").decode()
     assert '<a href="report.xhtml#one">First idea</a>' in nav
     assert '<a href="report.xhtml#part-1">Second</a>' in nav
     assert '<a href="report.xhtml#part-2">References</a>' in nav
+    assert "<a></a>" not in nav and "part-3" not in nav
     opf = z.read("OEBPS/content.opf").decode()
     assert "<dc:title>A &lt;video&gt;</dc:title>" in opf and "<dc:language>de</dc:language>" in opf
     assert z.read("OEBPS/cover.jpg").startswith(b"\xff\xd8")
+    assert 'idref="cover-page"' in opf
 
 
 def test_epub_without_cover(report, monkeypatch):
@@ -74,7 +79,7 @@ def test_send_records_delivery(report, monkeypatch):
 
     monkeypatch.setattr(kindle.smtplib, "SMTP", SMTP)
     kindle.send(report, "me@kindle.com", "from@example.com", "relay", 2525)
-    assert sent == [("relay", 2525), ("me@kindle.com", "from@example.com", "abc.epub")]
+    assert sent == [("relay", 2525), ("me@kindle.com", "from@example.com", "A video.epub")]
     assert "sent" in json.loads(report.with_suffix(".json").read_text())["kindle"]
 
 

@@ -7,6 +7,7 @@ Writes <out-dir>/<video_id>.html and <out-dir>/<video_id>.json (metadata).
 """
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -194,7 +195,7 @@ def save_thumbnail(path, video_id):
     for name in THUMBNAILS:
         try:
             with urllib.request.urlopen(f"https://i.ytimg.com/vi/{video_id}/{name}.jpg", timeout=30) as r:
-                out.write_bytes(r.read())
+                write_atomic(out, r.read())
             return out
         except OSError:
             continue
@@ -207,7 +208,14 @@ def read_meta(path):
 
 
 def write_meta(path, meta):
-    path.with_suffix(".json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    write_atomic(path.with_suffix(".json"), json.dumps(meta, indent=2).encode())
+
+
+def write_atomic(path, data):
+    """Write a file so that readers never see it half written."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
 
 
 def main():

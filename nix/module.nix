@@ -7,6 +7,8 @@
 let
   cfg = config.services.yt-transcripts;
   port = toString cfg.port;
+  # systemd expands % specifiers and $ variables even inside quotes
+  arg = s: lib.escapeShellArg (lib.replaceStrings [ "%" "$" ] [ "%%" "$$" ] s);
 in
 {
   options.services.yt-transcripts = {
@@ -85,11 +87,11 @@ in
             "--port ${port}"
             "--out-dir %S/yt-transcripts/reports"
           ]
-          ++ lib.optional (cfg.model != null) "--model ${lib.escapeShellArg cfg.model}"
+          ++ lib.optional (cfg.model != null) "--model ${arg cfg.model}"
           ++ lib.optionals (cfg.kindle.to != null) [
-            "--kindle-to ${lib.escapeShellArg cfg.kindle.to}"
-            "--kindle-from ${lib.escapeShellArg cfg.kindle.from}"
-            "--smtp-host ${lib.escapeShellArg cfg.kindle.smtpHost}"
+            "--kindle-to ${arg cfg.kindle.to}"
+            "--kindle-from ${arg cfg.kindle.from}"
+            "--smtp-host ${arg cfg.kindle.smtpHost}"
             "--smtp-port ${toString cfg.kindle.smtpPort}"
           ]
         );

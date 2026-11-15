@@ -97,13 +97,18 @@ function actionButton(label, path, id, error, confirmText) {
     if (confirmText && !confirm(confirmText)) return;
     button.disabled = true;
     error.textContent = "";
-    const res = await fetch(path, {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({id}),
-    });
-    if (res.ok) refresh();
-    else { error.textContent = (await res.json()).error; button.disabled = false; }
+    try {
+      const res = await fetch(path, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({id}),
+      });
+      if (res.ok) return refresh();
+      error.textContent = (await res.json()).error;
+    } catch {
+      error.textContent = "Request failed";
+    }
+    button.disabled = false;
   });
   return button;
 }

@@ -84,8 +84,9 @@ class Handler(BaseHTTPRequestHandler):
     worker = None
     # Keyword arguments for kindle.send, or None when sending isn't configured
     kindle = None
-    publish_lock = threading.Lock()
-    kindle_lock = threading.Lock()
+    # One publish or send at a time: both rewrite the report's metadata, and
+    # double clicks shouldn't create two pages or send twice
+    lock = threading.Lock()
 
     def respond(self, code, body, content_type, headers=()):
         self.send_response(code)
@@ -160,8 +161,7 @@ class Handler(BaseHTTPRequestHandler):
     def publish(self):
         if (report := self.read_report()) is None:
             return
-        # One upload at a time, so double clicks can't create two pages
-        with self.publish_lock:
+        with self.lock:
             try:
                 url = publish(report)
             except Error as e:
@@ -171,7 +171,7 @@ class Handler(BaseHTTPRequestHandler):
     def send_to_kindle(self):
         if (report := self.read_report()) is None:
             return
-        with self.kindle_lock:
+        with self.lock:
             try:
                 send(report, **self.kindle)
             except Error as e:
