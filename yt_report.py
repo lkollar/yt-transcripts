@@ -13,6 +13,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
+import urllib.request
 import webbrowser
 from html import escape
 from pathlib import Path
@@ -27,6 +29,7 @@ FONTS_URL = (
     "&family=IBM+Plex+Mono:wght@400;500&display=swap"
 )
 STYLESHEET = Path(__file__).with_name("report.css")
+PUBLISH_API = "https://api.ht-ml.app/v1/sites"
 
 SYSTEM_PROMPT = """\
 You turn video transcripts into polished, easy to digest HTML reports. The \
@@ -176,8 +179,52 @@ def make_report(url, out_dir="reports", lang=None, cookies_from_browser=None, mo
     path = out / f"{meta['id']}.html"
     path.write_text(html, encoding="utf-8")
     meta = {**meta, "created": int(time.time())}
-    path.with_suffix(".json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    # Keep the publish record so republishing updates the same page
+    if (old := read_meta(path)) and "published" in old:
+        meta["published"] = old["published"]
+    write_meta(path, meta)
     return path, meta
+
+
+def read_meta(path):
+    meta_path = path.with_suffix(".json")
+    return json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else None
+
+
+def write_meta(path, meta):
+    path.with_suffix(".json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+
+def publish(path):
+    """Upload a report to ht-ml.app, or update its earlier upload. Returns the public URL.
+
+    The page is public. The update key is stored in the report's metadata, as
+    ht-ml.app can't recover it.
+    """
+    meta = read_meta(path) or {}
+    published = meta.get("published")
+    body = json.dumps({"html_content": path.read_text(encoding="utf-8")}).encode()
+    headers = {"Content-Type": "application/json"}
+    if published:
+        url, method = f"{PUBLISH_API}/{published['site_id']}", "PUT"
+        headers["Authorization"] = f"Bearer {published['update_key']}"
+    else:
+        url, method = PUBLISH_API, "POST"
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, body, headers, method=method), timeout=60) as r:
+            site = json.load(r)
+    except urllib.error.HTTPError as e:
+        try:
+            message = json.load(e)["message"]
+        except (ValueError, KeyError, TypeError):
+            message = e.reason
+        raise SystemExit(f"publishing failed: HTTP {e.code}: {message}")
+    except urllib.error.URLError as e:
+        raise SystemExit(f"publishing failed: {e.reason}")
+    if not published:
+        meta["published"] = {k: site[k] for k in ("site_id", "url", "update_key")}
+        write_meta(path, meta)
+    return meta["published"]["url"]
 
 
 def main():

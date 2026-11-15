@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-from yt_report import make_report
+from yt_report import make_report, publish
 
 YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}
 
@@ -52,6 +52,8 @@ a { color: var(--accent); text-decoration: none; font-weight: 600; }
 a:hover { text-decoration: underline; }
 .meta { color: var(--muted); font-size: .875rem; }
 .error { color: var(--bad); font-size: .875rem; white-space: pre-wrap; }
+.publish { margin-top: .25rem; padding: .2rem .6rem; font-size: .8rem; font-weight: 500; color: var(--accent); background: none; border: 1px solid var(--line); border-radius: 6px; }
+.publish:disabled { opacity: .6; cursor: default; }
 </style>
 </head>
 <body>
@@ -91,10 +93,38 @@ function render(state) {
     const li = el("li"), a = el("a", null, r.title || r.id);
     a.href = `reports/${r.id}.html`;
     li.append(a, el("div", "meta", [r.channel, duration(r.duration), new Date(r.created * 1000).toLocaleDateString()].filter(Boolean).join(" \\u00b7 ")));
+    li.append(publishControls(r));
     return li;
   });
   $("reports").replaceChildren(...reports);
   $("reports-section").hidden = !reports.length;
+}
+
+function publishControls(r) {
+  const div = el("div", "meta");
+  if (r.published) {
+    const a = el("a", null, r.published);
+    a.href = r.published;
+    a.target = "_blank";
+    a.rel = "noopener";
+    div.append("Public: ", a, " ");
+  }
+  const button = el("button", "publish", r.published ? "Update" : "Publish");
+  const error = el("div", "error");
+  button.addEventListener("click", async () => {
+    if (!r.published && !confirm("Publish this report as a public page on ht-ml.app? Anyone with the link can read it, and it can't be deleted from here.")) return;
+    button.disabled = true;
+    error.textContent = "";
+    const res = await fetch("api/publish", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({id: r.id}),
+    });
+    if (res.ok) refresh();
+    else { error.textContent = (await res.json()).error; button.disabled = false; }
+  });
+  div.append(button, error);
+  return div;
 }
 
 async function refresh() {
@@ -165,6 +195,10 @@ class Worker:
 
     def state(self):
         reports = [json.loads(p.read_text(encoding="utf-8")) for p in Path(self.out_dir).glob("*.json")]
+        # Only the URL: the update key would let any tailnet visitor overwrite the page
+        for r in reports:
+            if "published" in r:
+                r["published"] = r["published"]["url"]
         reports.sort(key=lambda r: r["created"], reverse=True)
         return {"jobs": list(self.jobs.values()), "reports": reports}
 
@@ -176,6 +210,7 @@ def is_youtube_url(url):
 
 class Handler(BaseHTTPRequestHandler):
     worker = None
+    publish_lock = threading.Lock()
 
     def respond(self, code, body, content_type, headers=()):
         self.send_response(code)
@@ -205,7 +240,8 @@ class Handler(BaseHTTPRequestHandler):
             self.respond_json(404, {"error": "not found"})
 
     def do_POST(self):
-        if urlparse(self.path).path != "/api/jobs":
+        path = urlparse(self.path).path
+        if path not in ("/api/jobs", "/api/publish"):
             return self.respond_json(404, {"error": "not found"})
         # Requiring JSON makes browsers preflight cross-site requests, which we
         # don't answer, so other sites can't start jobs through a visitor's browser.
@@ -213,13 +249,27 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond_json(415, {"error": "expected application/json"})
         try:
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
-            url = body["url"].strip()
+            value = body["url" if path == "/api/jobs" else "id"].strip()
         except (ValueError, KeyError, TypeError, AttributeError):
             return self.respond_json(400, {"error": "invalid request"})
-        if not is_youtube_url(url):
+        if path == "/api/publish":
+            return self.publish(value)
+        if not is_youtube_url(value):
             return self.respond_json(400, {"error": "not a YouTube URL"})
-        self.worker.submit(url)
+        self.worker.submit(value)
         self.respond_json(202, {})
+
+    def publish(self, report_id):
+        report = Path(self.worker.out_dir) / f"{report_id}.html"
+        if not re.fullmatch(r"[\w-]+", report_id) or not report.is_file():
+            return self.respond_json(404, {"error": "not found"})
+        # One upload at a time, so double clicks can't create two pages
+        with self.publish_lock:
+            try:
+                url = publish(report)
+            except SystemExit as e:
+                return self.respond_json(502, {"error": str(e)})
+        self.respond_json(200, {"url": url})
 
 
 def main():

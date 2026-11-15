@@ -32,7 +32,7 @@ uv run web.py
 tailscale serve --bg --https 8446 http://127.0.0.1:8765
 ```
 
-Submit a URL and browse past reports at `https://<machine>.<tailnet>.ts.net:8446`. Options: `--host`, `--port`, `--model`, `--out-dir`, `--cookies-from-browser`.
+Submit a URL and browse past reports at `https://<machine>.<tailnet>.ts.net:8446`. The Publish button uploads a report to [ht-ml.app](https://ht-ml.app/) as a public page for sharing: anyone with the link can read it, and it can't be deleted. Update re-uploads it to the same URL. The page's update key is kept in the report's `.json` file. Options: `--host`, `--port`, `--model`, `--out-dir`, `--cookies-from-browser`.
 
 For a permanent service, `flake.nix` exports a NixOS module (`services.yt-transcripts`) which runs the web UI as a user service and adds the Tailscale route.
 
