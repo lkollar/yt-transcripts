@@ -7,9 +7,6 @@
 let
   cfg = config.services.yt-transcripts;
   port = toString cfg.port;
-  httpsPort = toString cfg.serve.httpsPort;
-  tailscale = "${pkgs.tailscale}/bin/tailscale";
-  routeCheck = ./serve-guard.py;
 in
 {
   options.services.yt-transcripts = {
@@ -34,11 +31,7 @@ in
     port = lib.mkOption {
       type = lib.types.port;
       default = 8765;
-    };
-    serve.enable = lib.mkEnableOption "private Tailscale Serve route";
-    serve.httpsPort = lib.mkOption {
-      type = lib.types.port;
-      default = 8446;
+      description = "Port on 127.0.0.1. The UI has no login: expose it privately.";
     };
   };
   config = lib.mkIf cfg.enable {
@@ -63,7 +56,7 @@ in
         Type = "simple";
         ExecStart = lib.concatStringsSep " " (
           [
-            "${cfg.package}/bin/yt-transcripts-web"
+            "${cfg.package}/bin/yt-report-web"
             "--port ${port}"
             "--out-dir %S/yt-transcripts/reports"
           ]
@@ -91,29 +84,6 @@ in
           "AF_INET6"
         ];
       };
-    };
-    services.tailscale.enable = lib.mkIf cfg.serve.enable true;
-    systemd.services.yt-transcripts-serve = lib.mkIf cfg.serve.enable {
-      description = "Private YouTube report Tailscale route";
-      wantedBy = [ "multi-user.target" ];
-      requires = [ "tailscaled.service" ];
-      after = [ "tailscaled.service" ];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-        UMask = "0077";
-        StateDirectory = "yt-transcripts-serve";
-      };
-      script = ''
-        set -eu
-        host=$(${tailscale} status --json | ${pkgs.jq}/bin/jq -er '.Self.DNSName | rtrimstr(".")'):${httpsPort}
-        state=/var/lib/yt-transcripts-serve
-        ${tailscale} serve status --json > "$state/before.json"
-        ${pkgs.python3}/bin/python3 ${routeCheck} "$state/before.json" "$host" ${port}
-        ${tailscale} serve --bg --https=${httpsPort} --yes http://127.0.0.1:${port}
-        ${tailscale} serve status --json > "$state/after.json"
-        ${pkgs.python3}/bin/python3 ${routeCheck} "$state/before.json" "$host" ${port} "$state/after.json"
-      '';
     };
   };
 }

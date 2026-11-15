@@ -4,11 +4,12 @@
   outputs =
     { self, nixpkgs }:
     let
-      system = "x86_64-linux";
-      pkgs = nixpkgs.legacyPackages.${system};
+      forAllSystems = nixpkgs.lib.genAttrs nixpkgs.lib.systems.flakeExposed;
     in
     {
-      packages.${system}.default = pkgs.callPackage ./default.nix { };
+      packages = forAllSystems (system: {
+        default = nixpkgs.legacyPackages.${system}.callPackage ./default.nix { };
+      });
       nixosModules.default = import ./nix/module.nix;
     };
 }

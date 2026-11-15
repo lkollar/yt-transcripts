@@ -1,6 +1,6 @@
 transcripts/
-__pycache__/
-
-.venv/
 reports/
+__pycache__/
+.venv/
+.pytest_cache/
 result

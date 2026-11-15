@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Video reports</title>
+<style>
+:root { color-scheme: light dark; --fg: #1c1c1e; --muted: #6e6e73; --line: #e2e2e6; --bg: #fafafa; --card: #fff; --accent: #2f5fd0; --bad: #c0362c; }
+@media (prefers-color-scheme: dark) { :root { --fg: #ececee; --muted: #9a9aa2; --line: #333338; --bg: #161618; --card: #1f1f22; --accent: #8aa9f5; --bad: #f08a80; } }
+* { box-sizing: border-box; }
+body { margin: 0 auto; max-width: 720px; padding: 2rem 1rem 4rem; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+h1 { font-size: 1.5rem; margin: 0 0 1rem; }
+h2 { font-size: .8rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 2rem 0 .5rem; }
+form { display: flex; gap: .5rem; }
+input { flex: 1; min-width: 0; padding: .6rem .75rem; font: inherit; color: inherit; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+button { padding: .6rem 1rem; font: inherit; font-weight: 600; color: #fff; background: #2f5fd0; border: 0; border-radius: 8px; cursor: pointer; }
+ul { list-style: none; margin: 0; padding: 0; }
+li { padding: .75rem 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+a { color: var(--accent); text-decoration: none; font-weight: 600; }
+a:hover { text-decoration: underline; }
+.meta { color: var(--muted); font-size: .875rem; }
+.error { color: var(--bad); font-size: .875rem; white-space: pre-wrap; }
+.publish { margin-top: .25rem; padding: .2rem .6rem; font-size: .8rem; font-weight: 500; color: var(--accent); background: none; border: 1px solid var(--line); border-radius: 6px; }
+.publish:disabled { opacity: .6; cursor: default; }
+</style>
+</head>
+<body>
+<h1>Video reports</h1>
+<form id="form">
+  <input id="url" type="url" required autofocus placeholder="YouTube URL" aria-label="YouTube URL">
+  <button>Generate</button>
+</form>
+<p id="form-error" class="error" role="alert"></p>
+<section id="jobs-section" hidden><h2>Jobs</h2><ul id="jobs"></ul></section>
+<section id="reports-section" hidden><h2>Reports</h2><ul id="reports"></ul></section>
+<script>
+const $ = id => document.getElementById(id);
+const el = (tag, className, text) => {
+  const e = document.createElement(tag);
+  if (className) e.className = className;
+  if (text != null) e.textContent = text;
+  return e;
+};
+const duration = s => {
+  if (!s) return "";
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60);
+  return h ? `${h}h ${m}m` : `${m}m`;
+};
+
+function render(state) {
+  const jobs = state.jobs.map(j => {
+    const li = el("li");
+    li.append(el("div", null, j.url));
+    li.append(j.error ? el("div", "error", j.error) : el("div", "meta", j.status + "\u2026"));
+    return li;
+  });
+  $("jobs").replaceChildren(...jobs);
+  $("jobs-section").hidden = !jobs.length;
+
+  const reports = state.reports.map(r => {
+    const li = el("li"), a = el("a", null, r.title || r.id);
+    a.href = `reports/${r.id}.html`;
+    li.append(a, el("div", "meta", [r.channel, duration(r.duration), new Date(r.created * 1000).toLocaleDateString()].filter(Boolean).join(" \u00b7 ")));
+    li.append(publishControls(r));
+    return li;
+  });
+  $("reports").replaceChildren(...reports);
+  $("reports-section").hidden = !reports.length;
+}
+
+function publishControls(r) {
+  const div = el("div", "meta");
+  if (r.published) {
+    const a = el("a", null, r.published);
+    a.href = r.published;
+    a.target = "_blank";
+    a.rel = "noopener";
+    div.append("Public: ", a, " ");
+  }
+  const button = el("button", "publish", r.published ? "Update" : "Publish");
+  const error = el("div", "error");
+  button.addEventListener("click", async () => {
+    if (!r.published && !confirm("Publish this report as a public page on ht-ml.app? Anyone with the link can read it, and it can't be deleted from here.")) return;
+    button.disabled = true;
+    error.textContent = "";
+    const res = await fetch("api/publish", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({id: r.id}),
+    });
+    if (res.ok) refresh();
+    else { error.textContent = (await res.json()).error; button.disabled = false; }
+  });
+  div.append(button, error);
+  return div;
+}
+
+async function refresh() {
+  try {
+    const state = await (await fetch("api/state")).json();
+    render(state);
+    return state.jobs.some(j => !j.error);
+  } catch { return true; }
+}
+
+let polling = false;
+async function poll() {
+  if (polling) return;
+  polling = true;
+  while (await refresh()) await new Promise(r => setTimeout(r, 2000));
+  polling = false;
+}
+
+$("form").addEventListener("submit", async e => {
+  e.preventDefault();
+  $("form-error").textContent = "";
+  const res = await fetch("api/jobs", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({url: $("url").value}),
+  });
+  if (res.ok) { $("url").value = ""; poll(); }
+  else $("form-error").textContent = (await res.json()).error;
+});
+
+poll();
+</script>
+</body>
+</html>

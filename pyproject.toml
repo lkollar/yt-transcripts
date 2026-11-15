@@ -2,7 +2,26 @@
 name = "yt-transcripts"
 version = "0.1.0"
 description = "Turn YouTube videos into HTML reports"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "László Kiss Kollár" }]
 requires-python = ">=3.13"
 dependencies = [
     "yt-dlp[curl-cffi,default]>=2026.10.26",
 ]
+
+[project.urls]
+Homepage = "https://github.com/lkollar/yt-transcripts"
+
+[project.scripts]
+yt-transcript = "yt_transcripts.transcript:main"
+yt-report = "yt_transcripts.report:main"
+yt-report-web = "yt_transcripts.web:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

@@ -1,8 +1,7 @@
-#!/usr/bin/env python3
 """Fetch the subtitles of a YouTube video as plain text using yt-dlp.
 
 Usage:
-    uv run fetch_transcript.py URL [--lang LANG] [--out-dir transcripts] [--timestamps]
+    yt-transcript URL [--lang LANG] [--out-dir transcripts] [--timestamps]
 
 Writes <out-dir>/<video_id>.txt (and prints it to stdout with --stdout).
 Uses the video's original language unless --lang is given.
@@ -16,6 +15,8 @@ from pathlib import Path
 
 from yt_dlp import YoutubeDL
 from yt_dlp.networking.exceptions import HTTPError
+
+from . import Error
 
 
 def original_language(info):
@@ -93,14 +94,14 @@ def fetch(url, lang=None, timestamps=False, cookies_from_browser=None):
         lang = lang or original_language(info)
         tracks, source = pick_track(info, lang)
         if not tracks:
-            raise SystemExit(f"No '{lang}' subtitles found for {info['id']}")
+            raise Error(f"No '{lang}' subtitles found for {info['id']}")
         track = next((t for t in tracks if t.get("ext") == "json3"), None)
         if not track:
-            raise SystemExit(f"No json3 subtitle format available ({source})")
+            raise Error(f"No json3 subtitle format available ({source})")
         try:
             raw = ydl.urlopen(track["url"]).read()
         except HTTPError as e:
-            raise SystemExit(
+            raise Error(
                 f"Subtitle download failed ({source}): {e}\n"
                 "HTTP 429 is expected for machine-translated tracks: drop --lang to use the "
                 "original language. Otherwise retry with --cookies-from-browser BROWSER."
@@ -127,7 +128,10 @@ def main():
     p.add_argument("--stdout", action="store_true", help="print the transcript instead of only saving it")
     a = p.parse_args()
 
-    meta, text = fetch(a.url, a.lang, a.timestamps, a.cookies_from_browser)
+    try:
+        meta, text = fetch(a.url, a.lang, a.timestamps, a.cookies_from_browser)
+    except Error as e:
+        raise SystemExit(f"error: {e}")
     out = Path(a.out_dir)
     out.mkdir(parents=True, exist_ok=True)
     header = "\n".join(f"{k}: {v}" for k, v in meta.items())

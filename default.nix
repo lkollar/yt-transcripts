@@ -1,39 +1,29 @@
 {
   lib,
-  stdenvNoCC,
-  makeWrapper,
-  python3,
+  python3Packages,
 }:
-let
-  python = python3.withPackages (ps: [ ps.yt-dlp ]);
-in
-stdenvNoCC.mkDerivation {
+python3Packages.buildPythonApplication {
   pname = "yt-transcripts";
   version = "0.1.0";
+  pyproject = true;
   src = lib.fileset.toSource {
     root = ./.;
     fileset = lib.fileset.unions [
-      ./fetch_transcript.py
-      ./report.css
-      ./web.py
-      ./yt_report.py
+      ./LICENSE
+      ./README.md
+      ./pyproject.toml
+      ./src
     ];
   };
-  nativeBuildInputs = [ makeWrapper ];
-  dontConfigure = true;
-  dontBuild = true;
-  installPhase = ''
-    mkdir -p $out/bin $out/libexec/yt-transcripts
-    cp *.py *.css $out/libexec/yt-transcripts/
-    makeWrapper ${python}/bin/python3 $out/bin/yt-transcripts-web \
-      --add-flags $out/libexec/yt-transcripts/web.py
-    makeWrapper ${python}/bin/python3 $out/bin/yt-report \
-      --add-flags $out/libexec/yt-transcripts/yt_report.py
-  '';
+  build-system = [ python3Packages.hatchling ];
+  dependencies = [ python3Packages.yt-dlp ];
+  # The yt-dlp extras are optional speedups; Nixpkgs' yt-dlp lacks some.
+  pythonRelaxDeps = [ "yt-dlp" ];
+  pythonImportsCheck = [ "yt_transcripts.web" ];
   meta = {
     description = "Turn YouTube videos into HTML reports";
     homepage = "https://github.com/lkollar/yt-transcripts";
-    mainProgram = "yt-transcripts-web";
-    platforms = [ "x86_64-linux" ];
+    license = lib.licenses.mit;
+    mainProgram = "yt-report-web";
   };
 }

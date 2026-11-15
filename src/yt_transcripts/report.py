@@ -1,8 +1,7 @@
-#!/usr/bin/env python3
 """Turn a YouTube video into a self-contained HTML report using the claude CLI.
 
 Usage:
-    uv run yt_report.py URL [--open] [--model MODEL] [--lang LANG] [--out-dir reports]
+    yt-report URL [--open] [--model MODEL] [--lang LANG] [--out-dir reports]
 
 Writes <out-dir>/<video_id>.html and <out-dir>/<video_id>.json (metadata).
 """
@@ -13,13 +12,12 @@ import subprocess
 import sys
 import tempfile
 import time
-import urllib.error
-import urllib.request
 import webbrowser
 from html import escape
 from pathlib import Path
 
-from fetch_transcript import fetch
+from . import Error
+from .transcript import fetch
 
 CLAUDE_TIMEOUT = 1200
 WEB_TOOLS = "WebSearch,WebFetch"
@@ -29,7 +27,6 @@ FONTS_URL = (
     "&family=IBM+Plex+Mono:wght@400;500&display=swap"
 )
 STYLESHEET = Path(__file__).with_name("report.css")
-PUBLISH_API = "https://api.ht-ml.app/v1/sites"
 
 SYSTEM_PROMPT = """\
 You turn video transcripts into polished, easy to digest HTML reports. The \
@@ -126,7 +123,7 @@ def build_prompt(meta, transcript):
 def extract_html(output):
     match = re.search(r"<!doctype html.*</html>", output, re.IGNORECASE | re.DOTALL)
     if not match:
-        raise SystemExit(f"claude did not return an HTML document: {output[:300]!r}")
+        raise Error(f"claude did not return an HTML document: {output[:300]!r}")
     return match.group(0) + "\n"
 
 
@@ -135,7 +132,7 @@ def add_stylesheet(html):
     head = f'<link rel="stylesheet" href="{escape(FONTS_URL)}">\n<style>\n{STYLESHEET.read_text(encoding="utf-8")}</style>\n'
     html, found = re.subn(r"</head>", lambda _: head + "</head>", html, count=1, flags=re.IGNORECASE)
     if not found:
-        raise SystemExit("claude's HTML document has no </head>")
+        raise Error("claude's HTML document has no </head>")
     return html
 
 
@@ -162,9 +159,9 @@ def generate_html(meta, transcript, model=None):
                 capture_output=True, text=True, timeout=CLAUDE_TIMEOUT,
             )
         except subprocess.TimeoutExpired:
-            raise SystemExit(f"claude timed out after {CLAUDE_TIMEOUT}s")
+            raise Error(f"claude timed out after {CLAUDE_TIMEOUT}s")
     if result.returncode:
-        raise SystemExit(f"claude failed: {(result.stderr or result.stdout).strip()[:500]}")
+        raise Error(f"claude failed: {(result.stderr or result.stdout).strip()[:500]}")
     return add_stylesheet(extract_html(result.stdout))
 
 
@@ -195,38 +192,6 @@ def write_meta(path, meta):
     path.with_suffix(".json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
 
-def publish(path):
-    """Upload a report to ht-ml.app, or update its earlier upload. Returns the public URL.
-
-    The page is public. The update key is stored in the report's metadata, as
-    ht-ml.app can't recover it.
-    """
-    meta = read_meta(path) or {}
-    published = meta.get("published")
-    body = json.dumps({"html_content": path.read_text(encoding="utf-8")}).encode()
-    headers = {"Content-Type": "application/json"}
-    if published:
-        url, method = f"{PUBLISH_API}/{published['site_id']}", "PUT"
-        headers["Authorization"] = f"Bearer {published['update_key']}"
-    else:
-        url, method = PUBLISH_API, "POST"
-    try:
-        with urllib.request.urlopen(urllib.request.Request(url, body, headers, method=method), timeout=60) as r:
-            site = json.load(r)
-    except urllib.error.HTTPError as e:
-        try:
-            message = json.load(e)["message"]
-        except (ValueError, KeyError, TypeError):
-            message = e.reason
-        raise SystemExit(f"publishing failed: HTTP {e.code}: {message}")
-    except urllib.error.URLError as e:
-        raise SystemExit(f"publishing failed: {e.reason}")
-    if not published:
-        meta["published"] = {k: site[k] for k in ("site_id", "url", "update_key")}
-        write_meta(path, meta)
-    return meta["published"]["url"]
-
-
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("url")
@@ -237,10 +202,13 @@ def main():
     p.add_argument("--open", action="store_true", help="open the report in the default browser")
     a = p.parse_args()
 
-    path, _ = make_report(
-        a.url, a.out_dir, a.lang, a.cookies_from_browser, a.model,
-        status=lambda s: print(f"{s}...", file=sys.stderr),
-    )
+    try:
+        path, _ = make_report(
+            a.url, a.out_dir, a.lang, a.cookies_from_browser, a.model,
+            status=lambda s: print(f"{s}...", file=sys.stderr),
+        )
+    except Error as e:
+        raise SystemExit(f"error: {e}")
     print(path)
     if a.open:
         webbrowser.open(path.resolve().as_uri())
