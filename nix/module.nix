@@ -33,12 +33,37 @@ in
       default = 8765;
       description = "Port on 127.0.0.1. The UI has no login: expose it privately.";
     };
+    kindle = {
+      to = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "Send to Kindle address; null disables sending.";
+      };
+      from = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "Sender, which must be on the Kindle account's approved list.";
+      };
+      smtpHost = lib.mkOption {
+        type = lib.types.str;
+        default = "localhost";
+        description = "SMTP relay accepting mail without authentication.";
+      };
+      smtpPort = lib.mkOption {
+        type = lib.types.port;
+        default = 25;
+      };
+    };
   };
   config = lib.mkIf cfg.enable {
     assertions = [
       {
         assertion = builtins.hasAttr cfg.user config.users.users;
         message = "yt-transcripts.user must name an existing user";
+      }
+      {
+        assertion = (cfg.kindle.to == null) == (cfg.kindle.from == null);
+        message = "yt-transcripts.kindle.to and kindle.from go together";
       }
     ];
     users.users.${cfg.user}.linger = true;
@@ -61,6 +86,12 @@ in
             "--out-dir %S/yt-transcripts/reports"
           ]
           ++ lib.optional (cfg.model != null) "--model ${lib.escapeShellArg cfg.model}"
+          ++ lib.optionals (cfg.kindle.to != null) [
+            "--kindle-to ${lib.escapeShellArg cfg.kindle.to}"
+            "--kindle-from ${lib.escapeShellArg cfg.kindle.from}"
+            "--smtp-host ${lib.escapeShellArg cfg.kindle.smtpHost}"
+            "--smtp-port ${toString cfg.kindle.smtpPort}"
+          ]
         );
         StateDirectory = "yt-transcripts";
         StateDirectoryMode = "0700";

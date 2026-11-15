@@ -41,7 +41,7 @@ yt-report URL --open
 ```
 
 Saves a self-contained report to `reports/<video_id>.html`, with metadata in
-`reports/<video_id>.json`. `claude` gets `WebSearch` and `WebFetch` to find
+`reports/<video_id>.json` and the thumbnail in `reports/<video_id>.jpg`. `claude` gets `WebSearch` and `WebFetch` to find
 reference links, so reports with many references take longer. It runs without
 your Claude settings, MCP servers or project context, since the transcript is
 untrusted input. Options: `--model`, `--lang`, `--out-dir`,
@@ -71,6 +71,16 @@ re-uploads it to the same URL. The page's update key is kept in the report's
 `.json` file. See ht-ml.app's [terms](https://ht-ml.app/terms) before
 publishing.
 
+### Send to Kindle
+
+With `--kindle-to` and `--kindle-from`, each report gets a Send to Kindle
+button, which emails it as an EPUB to your
+[Send to Kindle address](https://www.amazon.com/sendtokindle/email). Add the
+sender to the account's approved e-mail list first. Mail goes through an SMTP
+relay that accepts it without authentication, `localhost:25` by default, such
+as a local MTA forwarding to your mail provider (`--smtp-host`, `--smtp-port`).
+The video's thumbnail, saved next to each report, becomes the book's cover.
+
 ## NixOS
 
 `flake.nix` exports a package and a NixOS module which runs the web UI as a user
@@ -84,7 +94,8 @@ services.yt-transcripts = {
 ```
 
 Reports are kept in `~/.local/state/yt-transcripts/reports`. The UI listens on
-`127.0.0.1:8765` (`port` option); exposing it is up to you.
+`127.0.0.1:8765` (`port` option); exposing it is up to you. Set `kindle.to` and
+`kindle.from` to enable Send to Kindle (`kindle.smtpHost`, `kindle.smtpPort`).
 
 ## Development
 

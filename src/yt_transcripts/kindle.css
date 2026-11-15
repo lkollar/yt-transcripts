@@ -1,0 +1,21 @@
+body { font-family: serif; line-height: 1.45; }
+h1 { font-size: 1.6em; margin: 0 0 .5em; }
+h2 { font-size: 1.3em; margin: 1.2em 0 .5em; page-break-after: avoid; }
+h3 { font-size: 1.1em; margin: 1em 0 .3em; }
+p { margin: .5em 0; }
+.label { display: block; font-size: .75em; text-transform: uppercase; letter-spacing: .05em; margin-bottom: .3em; }
+.lede { font-style: italic; }
+.meta span { margin-left: 1em; }
+.ts { font-size: .8em; }
+.thesis, .do { margin: 1em 0; padding: .4em .8em; border: 1px solid #888; }
+.refs { font-size: .95em; }
+.note { font-size: .95em; font-style: italic; }
+blockquote { margin: 1em 1.5em; font-style: italic; }
+cite { display: block; font-style: normal; font-size: .85em; margin-top: .3em; }
+table { border-collapse: collapse; width: 100%; font-size: .9em; }
+th, td { border: 1px solid #888; padding: .3em; text-align: left; vertical-align: top; }
+nav ol { list-style: none; padding: 0; }
+nav li span { margin-right: .5em; }
+section { page-break-before: always; }
+.kit label { display: block; margin: .3em 0; }
+footer { margin-top: 2em; font-size: .8em; }

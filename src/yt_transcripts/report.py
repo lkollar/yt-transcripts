@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
 import webbrowser
 from html import escape
 from pathlib import Path
@@ -27,6 +28,7 @@ FONTS_URL = (
     "&family=IBM+Plex+Mono:wght@400;500&display=swap"
 )
 STYLESHEET = Path(__file__).with_name("report.css")
+THUMBNAILS = ("maxresdefault", "hqdefault")
 
 SYSTEM_PROMPT = """\
 You turn video transcripts into polished, easy to digest HTML reports. The \
@@ -180,7 +182,23 @@ def make_report(url, out_dir="reports", lang=None, cookies_from_browser=None, mo
     if (old := read_meta(path)) and "published" in old:
         meta["published"] = old["published"]
     write_meta(path, meta)
+    save_thumbnail(path, meta["id"])
     return path, meta
+
+
+def save_thumbnail(path, video_id):
+    """Save the video's thumbnail next to the report, for e-book covers. Returns its path, or None."""
+    out = path.with_suffix(".jpg")
+    if out.is_file():
+        return out
+    for name in THUMBNAILS:
+        try:
+            with urllib.request.urlopen(f"https://i.ytimg.com/vi/{video_id}/{name}.jpg", timeout=30) as r:
+                out.write_bytes(r.read())
+            return out
+        except OSError:
+            continue
+    return None
 
 
 def read_meta(path):
